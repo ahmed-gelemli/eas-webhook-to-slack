@@ -85,4 +85,4 @@ def webhook():
 
 if __name__ == "__main__":
     # For local dev; use gunicorn/uwsgi/etc. in production.
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "3000")))
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8004")))
