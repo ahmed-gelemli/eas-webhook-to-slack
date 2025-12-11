@@ -2,10 +2,13 @@ services:
   web:
     build: .
     container_name: eas
-    ports: ["127.0.0.1:8004:3000"]     # <— only bind to localhost
+    ports:
+      - "127.0.0.1:8004:${PORT:-3000}"
     env_file: .env
+    environment:
+      - PORT=${PORT:-3000}
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:$${PORT:-3000}/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -13,6 +13,5 @@ COPY app.py .
 RUN useradd -u 10001 -m worker
 USER worker
 
-ENV PORT=3000
 # Gunicorn with 2 workers, 1 thread each—tweak if needed
-CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:3000", "app:app"]
+CMD gunicorn -w 2 -b "0.0.0.0:${PORT:-3000}" app:app
