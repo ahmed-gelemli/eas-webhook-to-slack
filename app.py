@@ -3,7 +3,9 @@ import os
 import hmac
 import hashlib
 import json
+import uuid
 from flask import Flask, request, jsonify, abort
+from werkzeug.exceptions import HTTPException
 
 try:
     import requests  # slack notification
@@ -13,8 +15,34 @@ except ImportError:  # optional; you can also vendor something else or skip Slac
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")  # must match the SECRET set in `eas webhook:create`
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")  # paste your Slack URL here or export it
 
-app = Flask(__name__)
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
+# Set maximum content length to prevent DoS (10MB)
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
+
+
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    logger.warning("Request entity too large")
+    return jsonify(error="Request entity too large"), 413
+
+
+@app.errorhandler(400)
+def bad_request(error):
+    return jsonify(error=error.description or "Bad request"), 400
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.exception("Internal server error")
+    return jsonify(error="Internal server error"), 500
 
 def verify_expo_signature(raw_body: bytes, expo_sig: str | None) -> bool:
     """
@@ -63,24 +91,55 @@ def notify_slack(payload: dict) -> None:
 
 @app.get("/health")
 def health():
-    return jsonify(status="ok")
+    checks = {
+        "status": "ok",
+        "slack_configured": bool(SLACK_WEBHOOK_URL),
+        "requests_available": requests is not None,
+    }
+    status_code = 200 if checks["slack_configured"] and checks["requests_available"] else 503
+    return jsonify(checks), status_code
 
 
 @app.post("/webhook")
 def webhook():
-    raw = request.get_data()  # IMPORTANT: use raw bytes for HMAC
-    expo_sig = request.headers.get("expo-signature")  # case-insensitive
+    request_id = str(uuid.uuid4())
+    logger.info("Webhook request received", extra={"request_id": request_id})
 
-    if not verify_expo_signature(raw, expo_sig):
-        abort(401, description="Signatures didn't match!")
+    try:
+        raw = request.get_data()  # IMPORTANT: use raw bytes for HMAC
+        expo_sig = request.headers.get("expo-signature")  # case-insensitive
 
-    # Safe to parse now
-    payload = request.get_json(silent=True) or {}
+        if not verify_expo_signature(raw, expo_sig):
+            logger.warning("Signature verification failed", extra={"request_id": request_id})
+            abort(401, description="Signatures didn't match!")
 
-    # Do your thing
-    notify_slack(payload)
+        # Parse JSON with proper error handling
+        try:
+            payload = request.get_json(force=True)
+            if payload is None:
+                logger.warning("Empty or invalid JSON payload", extra={"request_id": request_id})
+                abort(400, description="Invalid JSON payload")
+        except Exception as e:
+            logger.error("JSON parsing failed", extra={"request_id": request_id, "error": str(e)})
+            abort(400, description="Invalid JSON payload")
 
-    return jsonify(ok=True)
+        # Validate required fields
+        if not isinstance(payload, dict):
+            logger.warning("Payload is not a dictionary", extra={"request_id": request_id})
+            abort(400, description="Payload must be a JSON object")
+
+        # Do your thing
+        notify_slack(payload)
+
+        logger.info("Webhook processed successfully", extra={"request_id": request_id})
+        return jsonify(ok=True)
+
+    except HTTPException:
+        # Re-raise HTTP exceptions (from abort()) so Flask handles them properly
+        raise
+    except Exception as e:
+        logger.exception("Unexpected error processing webhook", extra={"request_id": request_id})
+        abort(500, description="Internal server error")
 
 
 if __name__ == "__main__":
