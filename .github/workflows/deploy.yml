@@ -1,0 +1,52 @@
+name: Deploy to Amazon ECS
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  # ---------------------------------------------------------
+  # CHANGE THESE FOR EACH REPO
+  # ---------------------------------------------------------
+  AWS_REGION: us-east-1                   # Your AWS Region
+  ECR_REPOSITORY: eas-service             # Repo name (eas-service, focusbee-service, etc)
+  ECS_SERVICE: eas-service                # Service name (must match main.tf)
+  ECS_CLUSTER: my-cluster                 # Cluster name (must match main.tf)
+  # ---------------------------------------------------------
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and Push Image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          # Build the image and tag it as 'latest'
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          
+          # Push 'latest' to AWS (Overwrites the previous one)
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Force ECS Update
+        run: |
+          # This is the "Magic Command"
+          # It forces ECS to stop the current task and pull the new 'latest' image
+          aws ecs update-service --cluster $ECS_CLUSTER --service $ECS_SERVICE --force-new-deployment
