@@ -128,7 +128,6 @@ def webhook():
             logger.warning("Payload is not a dictionary", extra={"request_id": request_id})
             abort(400, description="Payload must be a JSON object")
 
-        # Do your thing
         notify_slack(payload)
 
         logger.info("Webhook processed successfully", extra={"request_id": request_id})
