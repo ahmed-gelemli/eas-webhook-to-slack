@@ -4,6 +4,7 @@ import hmac
 import hashlib
 import json
 import uuid
+from functools import lru_cache
 from flask import Flask, request, jsonify, abort
 from werkzeug.exceptions import HTTPException
 
@@ -12,8 +13,31 @@ try:
 except ImportError:  # optional; you can also vendor something else or skip Slack
     requests = None
 
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")  # must match the SECRET set in `eas webhook:create`
-SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")  # paste your Slack URL here or export it
+@lru_cache(maxsize=1)
+def _secrets_json() -> dict:
+    raw = os.getenv("APP_SECRETS_JSON", "")
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except json.JSONDecodeError:
+        # Don't crash local/dev if someone sets it wrong; just ignore it.
+        return {}
+
+
+def getenv(name: str, default: str = "") -> str:
+    # Local/dev: let developers keep using plain env vars
+    v = os.getenv(name)
+    if v is not None:
+        return v
+
+    # Production: values come via APP_SECRETS_JSON
+    return str(_secrets_json().get(name, default))
+
+
+WEBHOOK_SECRET = getenv("WEBHOOK_SECRET", "")  # must match the SECRET set in `eas webhook:create`
+SLACK_WEBHOOK_URL = getenv("SLACK_WEBHOOK_URL", "")  # paste your Slack URL here or export it
 
 # Configure logging
 logging.basicConfig(
