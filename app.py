@@ -93,11 +93,22 @@ def notify_slack(payload: dict) -> None:
 def health():
     checks = {
         "status": "ok",
+        "version": os.getenv("APP_VERSION", "unknown"),
         "slack_configured": bool(SLACK_WEBHOOK_URL),
         "requests_available": requests is not None,
     }
     status_code = 200 # if checks["slack_configured"] and checks["requests_available"] else 503
     return jsonify(checks), status_code
+
+
+@app.get("/version")
+def version():
+    return jsonify({
+        "version": os.getenv("APP_VERSION", "unknown"),
+        "commit_sha": os.getenv("COMMIT_SHA", "unknown"),
+        "build_date": os.getenv("BUILD_DATE", "unknown"),
+        "branch": os.getenv("GIT_BRANCH", "unknown"),
+    })
 
 
 @app.post("/webhook")

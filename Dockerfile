@@ -9,6 +9,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
 
+# Build arguments for version information
+ARG VERSION=unknown
+ARG COMMIT_SHA=unknown
+ARG BUILD_DATE=unknown
+ARG GIT_BRANCH=unknown
+
+ENV APP_VERSION=$VERSION
+ENV COMMIT_SHA=$COMMIT_SHA
+ENV BUILD_DATE=$BUILD_DATE
+ENV GIT_BRANCH=$GIT_BRANCH
+
 # Non-root (optional)
 RUN useradd -u 10001 -m worker
 USER worker

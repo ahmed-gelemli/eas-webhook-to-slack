@@ -38,9 +38,20 @@ jobs:
       - name: Build and Push Image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          GIT_BRANCH: ${{ github.ref_name }}
         run: |
+          # Get git information for version
+          VERSION=$(git rev-parse --short HEAD)
+          COMMIT_SHA=$(git rev-parse HEAD)
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          
           # Build the image and tag it as 'latest'
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker build \
+            --build-arg VERSION=$VERSION \
+            --build-arg COMMIT_SHA=$COMMIT_SHA \
+            --build-arg BUILD_DATE="$BUILD_DATE" \
+            --build-arg GIT_BRANCH=$GIT_BRANCH \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
           
           # Push 'latest' to AWS (Overwrites the previous one)
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
