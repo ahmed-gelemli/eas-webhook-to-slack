@@ -128,10 +128,10 @@ def health():
 @app.get("/version")
 def version():
     return jsonify({
-        "version": os.getenv("APP_VERSION", "unknown"),
-        "commit_sha": os.getenv("COMMIT_SHA", "unknown"),
+        "version": os.getenv("APP_VERSION") or os.getenv("SOURCE_COMMIT", "unknown"),
+        "commit_sha": os.getenv("COMMIT_SHA") or os.getenv("SOURCE_COMMIT", "unknown"),
         "build_date": os.getenv("BUILD_DATE", "unknown"),
-        "branch": os.getenv("GIT_BRANCH", "unknown"),
+        "branch": os.getenv("GIT_BRANCH") or os.getenv("COOLIFY_BRANCH", "unknown"),
     })
 
 
