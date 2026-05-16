@@ -81,6 +81,105 @@ def verify_expo_signature(raw_body: bytes, expo_sig: str | None) -> bool:
     expected = "sha1=" + mac.hexdigest()
     return hmac.compare_digest(expected, expo_sig)
 
+_STATUS_EMOJI = {
+    "finished": "✅",   # ✅
+    "errored": "❌",    # ❌
+    "canceled": "⛔",   # ⛔
+}
+
+
+def _build_slack_blocks(payload: dict) -> list:
+    is_submit = "submissionDetailsPageUrl" in payload or "turtleBuildId" in payload
+
+    status   = payload.get("status", "unknown")
+    platform = (payload.get("platform") or "unknown").capitalize()
+    account  = payload.get("accountName", "")
+    project  = payload.get("projectName", "")
+
+    metadata       = payload.get("metadata") or {}
+    app_version    = metadata.get("appVersion", "")
+    build_number   = metadata.get("appBuildVersion", "")
+    build_profile  = metadata.get("buildProfile", "")
+    distribution   = metadata.get("distribution", "")
+    commit_message = metadata.get("gitCommitMessage", "")
+
+    artifacts    = payload.get("artifacts") or {}
+    download_url = artifacts.get("buildUrl", "")
+
+    details_url = (
+        payload.get("submissionDetailsPageUrl") if is_submit
+        else payload.get("buildDetailsPageUrl", "")
+    ) or ""
+
+    error_obj = payload.get("error") or {}
+    if is_submit:
+        error_obj = (payload.get("submissionInfo") or {}).get("error") or error_obj
+    error_message = error_obj.get("message", "")
+    error_code    = error_obj.get("errorCode", "")
+
+    emoji      = _STATUS_EMOJI.get(status, "❔")
+    event_type = "Submission" if is_submit else "Build"
+
+    # Header: "✅ iOS Build Finished — v1.0.2 (123)"
+    version_str = " ".join(filter(None, [
+        f"v{app_version}" if app_version else "",
+        f"({build_number})" if build_number else "",
+    ]))
+    header_text = f"{emoji} {platform} {event_type} {status.capitalize()}"
+    if version_str:
+        header_text += f" — {version_str}"
+
+    # Context line: "production · store  |  myaccount/myproject"
+    profile_str = " · ".join(filter(None, [build_profile, distribution]))
+    context_parts = filter(None, [profile_str, f"{account}/{project}" if account else ""])
+    context_text = "  |  ".join(context_parts)
+
+    blocks = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": header_text, "emoji": True},
+        },
+        {
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": context_text or "​"}],
+        },
+    ]
+
+    if commit_message:
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*What’s new:* {commit_message}"},
+        })
+
+    if error_message:
+        err_text = f":warning: *Error:* {error_message}"
+        if error_code:
+            err_text += f"  `{error_code}`"
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": err_text},
+        })
+
+    actions = []
+    if download_url and status == "finished" and not is_submit:
+        actions.append({
+            "type": "button",
+            "text": {"type": "plain_text", "text": "Download Build", "emoji": True},
+            "url": download_url,
+            "style": "primary",
+        })
+    if details_url:
+        actions.append({
+            "type": "button",
+            "text": {"type": "plain_text", "text": "View Details", "emoji": True},
+            "url": details_url,
+        })
+    if actions:
+        blocks.append({"type": "actions", "elements": actions})
+
+    return blocks
+
+
 def notify_slack(payload: dict) -> None:
     if not SLACK_WEBHOOK_URL:
         logger.warning("SLACK_WEBHOOK_URL not set; skipping Slack notify")
@@ -89,24 +188,11 @@ def notify_slack(payload: dict) -> None:
         logger.warning("`requests` not installed; skipping Slack notify")
         return
 
-    status = payload.get("status")
-    account = payload.get("accountName")
-    project = payload.get("projectName")
-    platform = payload.get("platform")
-    url = payload.get("buildDetailsPageUrl")
-    error = (payload.get("error") or {}).get("message")
-
-    text = f"EAS build *{status}* for `{account}/{project}` on *{platform}*"
-    if url:
-        text += f"\n{url}"
-    if error:
-        text += f"\nError: `{error}`"
-
     try:
         resp = requests.post(
             SLACK_WEBHOOK_URL,
             headers={"Content-Type": "application/json"},
-            data=json.dumps({"text": text}),
+            data=json.dumps({"blocks": _build_slack_blocks(payload)}),
             timeout=5,
         )
         logger.info("Slack response %s %s", resp.status_code, resp.text)
